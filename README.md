@@ -1,3 +1,12 @@
+> **Overview integration (idefant fork):** version `2.2.8+multimonitor.3` adds
+> a versioned `vdeskoverview` bridge used by [idefant/hyprexpo](https://github.com/idefant/hyprexpo).
+> `vdeskoverview snapshot N` (1–64) prepares desktop layout ownership without
+> activating desktops or moving windows. Response: `vdesk-overview-v1`, `current N`,
+> then `desktop monitorID workspaceID` lines. `vdeskoverview select N` delegates
+> to the existing desktop manager. Numeric-only responses avoid exposing titles/content.
+> Hotplug and external-focus fixes from `.2` are retained. This plugin owns all
+> desktop semantics; hyprexpo only renders and requests selection.
+
 # Virtual desktops for Hyprland ![hyprico](.github/hyprland.ico)
 
 `virtual-desktops` is a plugin for the [Hyprland](https://github.com/hyprwm/Hyprland) compositor. `virtual-desktops` manages multiple screens workspaces as if they were a single virtual desktop.

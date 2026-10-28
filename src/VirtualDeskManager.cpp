@@ -456,3 +456,7 @@ CSharedPointer<Monitor::CMonitor> VirtualDeskManager::getFocusedMonitor() {
     }
     return currentMonitor.lock();
 }
+
+MonitorLayout VirtualDeskManager::overviewLayout(int id) {
+    return getOrCreateVdesk(id)->activeLayout(conf);
+}

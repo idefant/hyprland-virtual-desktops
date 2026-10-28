@@ -16,6 +16,7 @@
 #include <src/desktop/DesktopTypes.hpp>
 #include <hyprutils/utils/ScopeGuard.hpp>
 #include <vector>
+#include <sstream>
 
 using namespace Hyprutils::Memory;
 
@@ -413,8 +414,44 @@ void onConfigReloaded() {
     manager->loadLayoutConf();
 }
 
+// Versioned, numeric-only bridge for overview clients. Snapshot prepares layout
+// ownership without selecting desks or moving windows. No compositor IPC/socket,
+// Lua registry handles, or dependency on the client's rendering implementation.
+std::string overviewDispatch(eHyprCtlOutputFormat, std::string arg) {
+    std::istringstream input(arg);
+    std::string command, action, trailing;
+    int value = 0;
+    if (!(input >> command >> action >> value) || (input >> trailing) || value < 1 || value > 64)
+        return "error: expected vdeskoverview snapshot|select 1..64";
+    if (monitorLayoutChanging)
+        return "error: monitor layout is changing";
+    if (action == "select") {
+        manager->changeActiveDesk(value, true);
+        return "ok";
+    }
+    if (action != "snapshot")
+        return "error: unknown overview action";
+    std::ostringstream result;
+    result << "vdesk-overview-v1\ncurrent " << manager->activeVdesk()->id << '\n';
+    for (int id = 1; id <= value; ++id) {
+        const auto layout = manager->overviewLayout(id);
+        for (const auto& monitor : currentlyEnabledMonitors()) {
+            const auto entry = layout.find(monitorDesc(monitor));
+            if (entry == layout.end())
+                return "error: incomplete desktop layout";
+            result << id << ' ' << monitor->m_id << ' ' << entry->second << '\n';
+        }
+    }
+    return result.str();
+}
+
 void registerHyprctlCommands() {
     SHyprCtlCommand cmd;
+
+    cmd.name = "vdeskoverview";
+    cmd.fn = overviewDispatch;
+    cmd.exact = false;
+    HyprlandAPI::registerHyprCtlCommand(PHANDLE, cmd);
 
     // Register printlayout
     cmd.name  = PRINTLAYOUT_DISPATCH_STR;
@@ -503,5 +540,5 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     // Initialize first vdesk
     HyprlandAPI::reloadConfig();
-    return {"virtual-desktops", "Virtual desktop like workspaces", "LevMyskin", "2.2.8+multimonitor.2"};
+    return {"virtual-desktops", "Virtual desktop like workspaces", "LevMyskin", "2.2.8+multimonitor.3"};
 }

@@ -8,6 +8,7 @@
 class VirtualDeskManager {
 
   public:
+    MonitorLayout overviewLayout(int id);
     VirtualDeskManager();
     std::unordered_map<int, std::shared_ptr<VirtualDesk>> vdesksMap;
     int                                                   lastDesk      = -1;
