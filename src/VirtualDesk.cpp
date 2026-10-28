@@ -1,9 +1,12 @@
 #include "VirtualDesk.hpp"
 #include "globals.hpp"
+#include "VirtualDeskManager.hpp"
 #include <climits>
 #include <algorithm>
 #include <src/state/WorkspaceState.hpp>
 #include <unordered_set>
+
+extern std::unique_ptr<VirtualDeskManager> manager;
 
 VirtualDesk::VirtualDesk(int id, std::string name) {
     this->id   = id;
@@ -101,6 +104,18 @@ void VirtualDesk::invalidateActiveLayout() {
     activeIsValid = false;
 }
 
+const MonitorLayout& VirtualDesk::currentLayout() const {
+    static const MonitorLayout empty;
+    if (layouts.empty() || m_activeLayout_idx >= static_cast<int>(layouts.size()))
+        return empty;
+    return layouts[m_activeLayout_idx];
+}
+
+void VirtualDesk::setCurrentLayout(MonitorLayout layout) {
+    layouts[m_activeLayout_idx] = std::move(layout);
+    activeIsValid = true;
+}
+
 void VirtualDesk::resetLayout() {
     layouts[m_activeLayout_idx] = generateCurrentMonitorLayout();
 }
@@ -142,7 +157,7 @@ CSharedPointer<Monitor::CMonitor> VirtualDesk::firstAvailableMonitor(const std::
 }
 
 bool VirtualDesk::isWorkspaceOnActiveLayout(WORKSPACEID workspaceId) {
-    for (const auto& [_, wid] : layouts[m_activeLayout_idx]) {
+    for (const auto& [_, wid] : currentLayout()) {
         if (workspaceId == wid)
             return true;
     }
@@ -188,7 +203,12 @@ MonitorLayout VirtualDesk::generateCurrentMonitorLayout() {
     auto vdeskFirstWorkspace = (this->id - 1) * monitors.size() + 1;
     int  j                   = 0;
     for (size_t i = vdeskFirstWorkspace; i < vdeskFirstWorkspace + monitors.size(); i++) {
-        layout[monitorDesc(monitors[j])] = i;
+        auto wid = static_cast<WORKSPACEID>(i);
+        if (PHANDLE && manager)
+            wid = manager->availableWorkspaceId(wid, id);
+        while (std::ranges::any_of(layout, [wid](const auto& slot) { return slot.second == wid; }))
+            wid = manager->availableWorkspaceId(wid + 1, id);
+        layout[monitorDesc(monitors[j])] = wid;
         j++;
     }
     return layout;

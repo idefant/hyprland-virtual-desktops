@@ -10,6 +10,7 @@
 #include <src/state/MonitorState.hpp>
 #include <src/state/WorkspaceState.hpp>
 #include <src/state/WorkspacePlacementController.hpp>
+#include <src/desktop/state/ViewState.hpp>
 
 VirtualDeskManager::VirtualDeskManager() {
     this->conf = RememberLayoutConf::size;
@@ -230,6 +231,87 @@ void VirtualDeskManager::cycleWorkspaces() {
                  "\nIf you would like to have this feature, open an issue on virtual-desktops github repo, or even "
                  "better, open a PR :)");
     }
+}
+
+WORKSPACEID VirtualDeskManager::availableWorkspaceId(WORKSPACEID preferred, int vdeskId) {
+    while (isWorkspaceOwnedByOtherVdesk(preferred, vdeskId))
+        ++preferred;
+    return preferred;
+}
+
+void VirtualDeskManager::reconcileMonitorLayout(const CSharedPointer<Monitor::CMonitor>& exclude) {
+    const auto enabled = currentlyEnabledMonitors(exclude);
+    if (enabled.empty())
+        return;
+
+    // Snapshot ownership BEFORE selecting a layout for the new output set. A
+    // workspace number alone cannot identify its desktop after a 2 -> 1 change.
+    std::unordered_map<WORKSPACEID, int> owners;
+    std::vector<int> ids;
+    for (const auto& [id, desk] : vdesksMap) {
+        ids.push_back(id);
+        for (const auto& [_, wid] : desk->currentLayout())
+            owners.emplace(wid, id);
+    }
+    std::sort(ids.begin(), ids.end());
+    struct PendingWindow {
+        PHLWINDOW window;
+        int desk;
+        std::string output;
+    };
+    std::vector<PendingWindow> pending;
+    std::unordered_set<WORKSPACEID> reserved;
+    for (const auto& window : Desktop::viewState()->windows()) {
+        if (!window->m_isMapped || !window->m_workspace || window->m_workspace->m_isSpecialWorkspace)
+            continue;
+        const auto wid = window->m_workspace->m_id;
+        if (const auto owner = owners.find(wid); owner != owners.end())
+            pending.push_back({window, owner->second, monitorDesc(window->m_monitor.lock())});
+        else
+            reserved.insert(wid); // Never absorb an unmanaged workspace's windows.
+    }
+
+    invalidateAllLayouts();
+    std::unordered_map<int, MonitorLayout> targets;
+    for (int id : ids) {
+        const auto remembered = vdesksMap.at(id)->activeLayout(conf, exclude);
+        MonitorLayout layout;
+        for (const auto& mon : enabled) {
+            const auto desc = monitorDesc(mon);
+            auto wid = remembered.contains(desc) ? remembered.at(desc) : WORKSPACEID{1};
+            while (wid <= 0 || reserved.contains(wid) || (owners.contains(wid) && owners.at(wid) != id))
+                ++wid;
+            layout[desc] = wid;
+            reserved.insert(wid);
+        }
+        targets.emplace(id, std::move(layout));
+    }
+    // Publish all ownership before any workspace movement emits callbacks.
+    for (int id : ids)
+        vdesksMap.at(id)->setCurrentLayout(targets.at(id));
+
+    // WorkspaceState stores weak references. Keep empty destinations alive
+    // while evacuating their old windows and filling them from another desk.
+    std::unordered_map<WORKSPACEID, PHLWORKSPACE> workspaces;
+    for (int id : ids) {
+        for (const auto& mon : enabled) {
+            const auto wid = targets.at(id).at(monitorDesc(mon));
+            auto ws = State::workspaceState()->query().id(wid).run();
+            if (!ws)
+                ws = State::workspaceState()->create(wid, mon->m_id);
+            if (ws->m_monitor != mon)
+                State::workspacePlacementController()->moveWorkspaceToMonitor(ws, mon);
+            workspaces.emplace(wid, ws);
+        }
+    }
+    for (const auto& item : pending) {
+        const auto& layout = targets.at(item.desk);
+        const auto desc = layout.contains(item.output) ? item.output : monitorDesc(enabled.front());
+        const auto target = workspaces.at(layout.at(desc));
+        if (item.window->m_workspace != target)
+            Desktop::globalWindowController()->moveWindowToWorkspace(item.window, target);
+    }
+    applyCurrentVDesk();
 }
 
 void VirtualDeskManager::deleteInvalidMonitorsOnAllVdesks(const CSharedPointer<Monitor::CMonitor>& monitor) {

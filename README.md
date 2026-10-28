@@ -463,3 +463,36 @@ If instead you're seeing weird behaviour with the plugin itself, remember you ca
 
 [split-workspaces](https://github.com/Duckonaut/split-monitor-workspaces/), from which I borrowed the Makefile,
 and the general idea of how to write Hyprland plugins.
+
+
+## Hotplug fix in this fork
+
+This fork is based on upstream `e55eb19` (Hyprland 0.56.2). When outputs change,
+window-to-desktop ownership is captured before choosing the new layouts.
+Every enabled output receives a unique workspace in each existing desktop;
+windows are then moved to reachable workspaces of the same logical desktop.
+Windows from a removed output join a remaining output. This preserves access
+and the logical desktop; it does not promise restoration of every window's
+original output or pixel geometry after reconnecting.
+
+The transaction excludes special workspaces, preserves unmanaged populated
+workspaces, holds empty destination workspaces alive, and suppresses workspace
+recording until the transaction finishes. New desktops avoid workspace IDs
+already owned by existing desktops. Internal workspace numbers may consequently
+differ from `(desktop - 1) * monitor_count + slot`.
+
+Integration regression (needs a running Wayland session, Hyprland and foot):
+
+```sh
+make all
+python3 tests/hotplug.py ./virtual-desktops.so monitors
+python3 tests/hotplug.py ./virtual-desktops.so size
+python3 tests/hotplug.py ./virtual-desktops.so none
+```
+
+The test starts its own nested compositor, creates only synthetic sleep windows,
+and never disconnects parent-session outputs. It checks logical ownership,
+actual workspace selection, repeated unplug/reconnect, three outputs, new desktop
+creation, reload, and floating/fullscreen windows. To test replacing an already
+loaded upstream plugin in that nested session, set `VDESK_TEST_UPGRADE_FROM` to
+an upstream `.so` path. Built plugins must match installed Hyprland headers.

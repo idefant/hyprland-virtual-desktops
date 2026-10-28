@@ -23,6 +23,8 @@ class VirtualDeskManager {
     int                                                   moveToDesk(std::string&, int vdeskId = -1);
     void                                                  loadLayoutConf();
     void                                                  invalidateAllLayouts();
+    void                                                  reconcileMonitorLayout(const CSharedPointer<Monitor::CMonitor>& exclude = nullptr);
+    WORKSPACEID                                           availableWorkspaceId(WORKSPACEID preferred, int vdeskId);
     void                                                  resetAllVdesks();
     void                                                  resetVdesk(const std::string& arg);
     void                                                  deleteInvalidMonitorsOnAllVdesks(const CSharedPointer<Monitor::CMonitor>&);

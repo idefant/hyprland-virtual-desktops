@@ -7,3 +7,5 @@ result/
 build
 .envrc
 .direnv
+
+__pycache__/

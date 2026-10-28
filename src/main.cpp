@@ -373,13 +373,11 @@ void onMonitorRemoved(PHLMONITOR monitor) {
     if (isVerbose())
         printLog("Monitor disconnect called with disabled monitor " + monitor->m_name);
 
-    monitorLayoutChanging = false;
     if (!currentlyEnabledMonitors(monitor).empty()) {
-        manager->invalidateAllLayouts();
-        manager->deleteInvalidMonitorsOnAllVdesks(monitor);
-        manager->applyCurrentVDesk();
+        manager->reconcileMonitorLayout(monitor);
         StickyApps::matchRules(stickyRules, manager);
     }
+    monitorLayoutChanging = false;
 }
 
 void onPreMonitorAdded(PHLMONITOR monitor) {
@@ -397,11 +395,9 @@ void onMonitorAdded(PHLMONITOR monitor) {
     }
     if (isVerbose())
         printLog("Monitor connect called with monitor " + monitor->m_name);
-    monitorLayoutChanging = false;
-    manager->invalidateAllLayouts();
-    manager->deleteInvalidMonitorsOnAllVdesks();
-    manager->applyCurrentVDesk();
+    manager->reconcileMonitorLayout();
     StickyApps::matchRules(stickyRules, manager);
+    monitorLayoutChanging = false;
 }
 
 void onConfigReloaded() {
@@ -503,5 +499,5 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     // Initialize first vdesk
     HyprlandAPI::reloadConfig();
-    return {"virtual-desktops", "Virtual desktop like workspaces", "LevMyskin", "2.2.8"};
+    return {"virtual-desktops", "Virtual desktop like workspaces", "LevMyskin", "2.2.8+hotplug.1"};
 }
