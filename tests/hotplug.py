@@ -105,6 +105,19 @@ try:
             assert active == layouts[number], (stage, 'not visible', number, active, layouts[number])
             visible = {w['address'] for w in query('clients') if w['workspace']['id'] in active}
             assert visible == {a for a, d in expected.items() if d == number}, (stage, 'desktop leakage')
+        if not (original and stage == 'two outputs'):
+            # A browser activation or explicit window focus enters the same
+            # workspace.active path; it must switch the whole logical desktop.
+            before = {w['address']:w['workspace'] for w in query('clients')}
+            for target_desk in (2, 1):
+                desk(3)
+                target_window = next(a for a,d in expected.items() if d == target_desk)
+                ctl('dispatch','hl.dsp.focus({window='+json.dumps('address:'+target_window)+'})')
+                focused = next(d['id'] for d in query('printstate') if d['focused'])
+                assert focused == target_desk, (stage,'external focus did not change logical desk',focused)
+                assert {m['activeWorkspace']['id'] for m in query('monitors')} == layouts[target_desk], (stage,'external focus switched only one output')
+                assert query('activewindow')['address'] == target_window, (stage,'activation lost target focus')
+            assert before == {w['address']:w['workspace'] for w in query('clients')}
         assert not ctl('configerrors').strip()
         print('PASS', mode, stage, flush=True)
 

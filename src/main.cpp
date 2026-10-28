@@ -14,6 +14,7 @@
 
 #include <plugins/PluginAPI.hpp>
 #include <src/desktop/DesktopTypes.hpp>
+#include <hyprutils/utils/ScopeGuard.hpp>
 #include <vector>
 
 using namespace Hyprutils::Memory;
@@ -30,6 +31,7 @@ std::unique_ptr<VirtualDeskManager>  manager = std::make_unique<VirtualDeskManag
 std::vector<StickyApps::SStickyRule> stickyRules;
 bool                                 notifiedInit          = false;
 bool                                 monitorLayoutChanging = false;
+bool                                 syncingExternalFocus = false;
 
 void                                 parseNamesConf(const std::string& _conf) {
     std::string conf = _conf;
@@ -323,7 +325,7 @@ SDispatchResult resetVDeskDispatch(std::string arg) {
 }
 
 void onWorkspaceChange(PHLWORKSPACE workspace) {
-    if (monitorLayoutChanging)
+    if (monitorLayoutChanging || syncingExternalFocus || !workspace || workspace->m_isSpecialWorkspace)
         return;
 
     auto monitor = workspace->m_monitor.lock();
@@ -332,16 +334,18 @@ void onWorkspaceChange(PHLWORKSPACE workspace) {
 
     auto vdesk = manager->activeVdesk();
 
-    // A workspace belongs to a single vdesk. A focus pull onto a workspace
-    // owned by another vdesk must not record it in the active vdesk's layout:
-    // otherwise the same workspace ends up in two layouts, and its windows
-    // follow along on every vdesk switch. Only skip workspaces that are
-    // already owned by a *different* vdesk; our own and not-yet-owned
-    // workspaces keep updating the layout as before.
-    if (manager->isWorkspaceOwnedByOtherVdesk(workspace->m_id, vdesk->id)) {
-        if (isVerbose())
-            printLog(std::format("not recording workspace {} on vdesk {}: owned by another vdesk", workspace->m_id, vdesk->id));
-        return;
+    // An activation request (for example an URL opening in an existing
+    // browser) changes one monitor's workspace directly. Follow that request
+    // with the whole virtual desktop instead of recording a foreign workspace
+    // or leaving the other outputs behind. Resolve real ownership: workspace
+    // IDs no longer imply desktop IDs after monitor changes.
+    for (const auto& [id, owner] : manager->vdesksMap) {
+        if (id != vdesk->id && owner && owner->isWorkspaceOnActiveLayout(workspace->m_id)) {
+            syncingExternalFocus = true;
+            const Hyprutils::Utils::CScopeGuard resetFocusSync([] { syncingExternalFocus = false; });
+            manager->changeActiveDesk(id, true);
+            return;
+        }
     }
 
     vdesk->changeWorkspaceOnMonitor(workspace->m_id, monitor);
@@ -499,5 +503,5 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     // Initialize first vdesk
     HyprlandAPI::reloadConfig();
-    return {"virtual-desktops", "Virtual desktop like workspaces", "LevMyskin", "2.2.8+hotplug.1"};
+    return {"virtual-desktops", "Virtual desktop like workspaces", "LevMyskin", "2.2.8+multimonitor.2"};
 }

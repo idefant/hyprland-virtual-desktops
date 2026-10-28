@@ -496,3 +496,19 @@ actual workspace selection, repeated unplug/reconnect, three outputs, new deskto
 creation, reload, and floating/fullscreen windows. To test replacing an already
 loaded upstream plugin in that nested session, set `VDESK_TEST_UPGRADE_FROM` to
 an upstream `.so` path. Built plugins must match installed Hyprland headers.
+
+
+## External focus requests
+
+Opening a URL in an existing browser may directly activate its workspace on
+one output. The fork follows that activation by switching the whole virtual
+desktop that owns the workspace, keeping the other outputs synchronized.
+Ownership is resolved from actual layouts rather than a workspace-number formula,
+so it also works after hotplug. Reentrant workspace notifications during that
+switch are ignored; special workspaces keep their separate scratchpad behavior.
+
+The earlier upstream proposal [#98](https://github.com/levnikmyskin/hyprland-virtual-desktops/pull/98)
+addresses the same scenario. Its old API and arithmetic desktop-ID lookup are
+not used here. The integration regression also checks direct window activation
+in both directions, target window focus, unchanged window ownership, and all
+outputs switching together before and after changing the output set.
