@@ -1,3 +1,9 @@
+> **Focus restoration:** version `2.2.8+multimonitor.4` remembers the last active
+> ordinary window separately for each logical desktop, across all outputs.
+> Returning restores that window and centers the cursor, respecting
+> `cursor:no_warps`. Closed or moved windows are ignored. Explicit application
+> activation and move-and-follow dispatchers retain their requested target.
+
 > **Overview integration (idefant fork):** version `2.2.8+multimonitor.3` adds
 > a versioned `vdeskoverview` bridge used by [idefant/hyprexpo](https://github.com/idefant/hyprexpo).
 > `vdeskoverview snapshot N` (1–64) prepares desktop layout ownership without

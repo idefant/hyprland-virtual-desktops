@@ -16,11 +16,12 @@ class VirtualDeskManager {
     RememberLayoutConf                                    conf;
     const std::shared_ptr<VirtualDesk>&                   activeVdesk();
     void                                                  changeActiveDesk(std::string&, bool);
-    void                                                  changeActiveDesk(int, bool);
+    void                                                  changeActiveDesk(int, bool, bool restoreFocus = true);
     void                                                  lastVisitedDesk();
     void                                                  prevDesk(bool backwardCycle);
     void                                                  nextDesk(bool cycle);
-    void                                                  applyCurrentVDesk();
+    void                                                  applyCurrentVDesk(bool restoreFocus = true);
+    void                                                  rememberWindowFocus(PHLWINDOW window);
     int                                                   moveToDesk(std::string&, int vdeskId = -1);
     void                                                  loadLayoutConf();
     void                                                  invalidateAllLayouts();
@@ -37,6 +38,8 @@ class VirtualDeskManager {
     bool                                                  isWorkspaceOwnedByOtherVdesk(WORKSPACEID workspaceId, int vdeskId);
 
   private:
+    std::unordered_map<int, PHLWINDOWREF> m_lastFocusedWindows;
+    bool                              m_applyingDesk = false;
     int                               m_activeDeskKey = 1;
     bool                              confLoaded      = false;
     void                              cycleWorkspaces();

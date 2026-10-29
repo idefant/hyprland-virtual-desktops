@@ -17,7 +17,7 @@ mode = sys.argv[2] if len(sys.argv) > 2 else 'monitors'
 root = Path(tempfile.mkdtemp(prefix='vdesk-hotplug-test-'))
 config = root / 'test.lua'
 config.write_text('hl.monitor({output="",mode="800x600@60",position="auto",scale=1})\n'
-                  'hl.config({debug={disable_logs=false},animations={enabled=false},cursor={no_warps=true}})\n')
+                  'hl.config({debug={disable_logs=false},animations={enabled=false},cursor={no_warps=false,warp_on_change_workspace=1}})\n')
 env = os.environ.copy()
 env.update(AQ_DRM_DEVICES='/dev/null', HYPRLAND_NO_SD_VARS='1',
            HYPRLAND_NO_SD_NOTIFY='1', HYPRLAND_NO_RT='1')
@@ -120,6 +120,69 @@ try:
             assert before == {w['address']:w['workspace'] for w in query('clients')}
         assert not ctl('configerrors').strip()
         print('PASS', mode, stage, flush=True)
+
+    if not original:
+        def focus(address):
+            ctl('dispatch', 'hl.dsp.focus({window=' + json.dumps('address:' + address) + '})')
+
+        def assert_focus(address, stage):
+            active = query('activewindow')
+            assert active.get('address') == address, (stage, 'wrong remembered focus', active.get('address'), address)
+            pos = query('cursorpos')
+            center = [active['at'][i] + active['size'][i] / 2 for i in (0, 1)]
+            assert abs(pos['x'] - center[0]) <= 2 and abs(pos['y'] - center[1]) <= 2, (stage, 'cursor not centered', pos, center)
+
+        outputs = {m['name']: m['id'] for m in query('monitors')}
+        windows = query('clients')
+        left = next(w['address'] for w in windows if expected[w['address']] == 1 and w['monitor'] == outputs[primary])
+        right = next(w['address'] for w in windows if expected[w['address']] == 2 and w['monitor'] == outputs['VTEST-2'])
+        desk(1)
+        focus(left)
+        desk(2)
+        focus(right)
+        for _ in range(4):
+            desk(1)
+            assert_focus(left, 'return to first output')
+            desk(2)
+            assert_focus(right, 'return to second output')
+        # Change the remembered window within a desktop, not just its output.
+        desk(1)
+        alternate = next(w['address'] for w in windows if expected[w['address']] == 1 and w['address'] != left)
+        focus(alternate)
+        desk(2)
+        desk(1)
+        assert_focus(alternate, 'updated last focus')
+        # Silent moves invalidate old ownership without pulling the window back.
+        lua('hl.plugin.virtual_desktops.movetodesksilent("3")')
+        expected[alternate] = 3
+        desk(2)
+        desk(1)
+        assert query('activewindow').get('address') != alternate
+        # Moving with a desktop switch must follow the moved window even when
+        # the destination already remembers another window on another output.
+        desk(1)
+        focus(left)
+        lua('hl.plugin.virtual_desktops.movetodesk("2")')
+        expected[left] = 2
+        assert_focus(left, 'move and follow')
+        lua('hl.plugin.virtual_desktops.movetodesk("1")')
+        expected[left] = 1
+        assert_focus(left, 'move and follow back')
+        # A closed weak reference must never be dereferenced on return.
+        desk(2)
+        focus(right)
+        ctl('dispatch', 'hl.dsp.window.close({window=' + json.dumps('address:' + right) + '})')
+        for _ in range(50):
+            if not any(w['address'] == right for w in query('clients')):
+                break
+            time.sleep(.05)
+        del expected[right]
+        desk(1)
+        desk(2)
+        assert query('activewindow').get('address') != right
+        # Keep the original topology coverage symmetric after these regressions.
+        add_window(2, 'VTEST-2')
+        print('PASS', mode, 'per-desktop focus, centered cursor, moved/closed windows', flush=True)
 
     verify('two outputs')
     if original:

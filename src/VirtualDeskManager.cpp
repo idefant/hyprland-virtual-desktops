@@ -11,6 +11,8 @@
 #include <src/state/WorkspaceState.hpp>
 #include <src/state/WorkspacePlacementController.hpp>
 #include <src/desktop/state/ViewState.hpp>
+#include <src/pointer/PointerController.hpp>
+#include <hyprutils/utils/ScopeGuard.hpp>
 
 VirtualDeskManager::VirtualDeskManager() {
     this->conf = RememberLayoutConf::size;
@@ -30,17 +32,35 @@ void VirtualDeskManager::changeActiveDesk(std::string& arg, bool apply) {
     changeActiveDesk(vdeskId, apply);
 }
 
-void VirtualDeskManager::changeActiveDesk(int vdeskId, bool apply) {
+void VirtualDeskManager::rememberWindowFocus(PHLWINDOW window) {
+    // Workspace activation emits intermediate focus changes while outputs are
+    // being switched. Only retain real focus on the current logical desktop.
+    if (m_applyingDesk || !window || !window->m_isMapped || window->isHidden() || !window->m_workspace ||
+        window->m_workspace->m_isSpecialWorkspace || window->m_pinned)
+        return;
+    if (activeVdesk()->isWorkspaceOnActiveLayout(window->m_workspace->m_id))
+        m_lastFocusedWindows[m_activeDeskKey] = window;
+}
+
+void VirtualDeskManager::changeActiveDesk(int vdeskId, bool apply, bool restoreFocus) {
     if (vdeskId == activeVdesk()->id) {
         cycleWorkspaces();
         return;
     }
 
-    getOrCreateVdesk(vdeskId);
+    rememberWindowFocus(Desktop::focusState()->window());
+    auto destination = getOrCreateVdesk(vdeskId);
+    const auto moving = Desktop::focusState()->window();
+    // A move-and-follow dispatcher has already moved the active window. Keep
+    // that explicit target instead of restoring an older destination window.
+    if (restoreFocus && moving && moving->m_isMapped && moving->m_workspace &&
+        !moving->m_workspace->m_isSpecialWorkspace && !moving->m_pinned &&
+        destination->isWorkspaceOnActiveLayout(moving->m_workspace->m_id))
+        m_lastFocusedWindows[vdeskId] = moving;
     lastDesk        = activeVdesk()->id;
     m_activeDeskKey = vdeskId;
     if (apply)
-        applyCurrentVDesk();
+        applyCurrentVDesk(restoreFocus);
 }
 
 void VirtualDeskManager::lastVisitedDesk() {
@@ -59,7 +79,7 @@ void VirtualDeskManager::nextDesk(bool cycle) {
     changeActiveDesk(nextDeskId(cycle), true);
 }
 
-void VirtualDeskManager::applyCurrentVDesk() {
+void VirtualDeskManager::applyCurrentVDesk(bool restoreFocus) {
     auto enabled = currentlyEnabledMonitors();
     if (enabled.empty()) {
         printLog("There are no monitors!");
@@ -67,7 +87,16 @@ void VirtualDeskManager::applyCurrentVDesk() {
     }
     if (isVerbose())
         printLog("applying vdesk" + activeVdesk()->name);
-    auto         currentMonitor   = getFocusedMonitor();
+    const bool wasApplying = m_applyingDesk;
+    m_applyingDesk = true;
+    const Hyprutils::Utils::CScopeGuard resetApplying([this, wasApplying] { m_applyingDesk = wasApplying; });
+    auto remembered = m_lastFocusedWindows[m_activeDeskKey].lock();
+    if (remembered && (!remembered->m_isMapped || remembered->isHidden() || !remembered->m_workspace ||
+                       remembered->m_workspace->m_isSpecialWorkspace || remembered->m_pinned ||
+                       !activeVdesk()->isWorkspaceOnActiveLayout(remembered->m_workspace->m_id) ||
+                       !remembered->m_monitor || !remembered->m_monitor->m_enabled))
+        remembered.reset();
+    auto         currentMonitor   = restoreFocus && remembered ? remembered->m_monitor.lock() : getFocusedMonitor();
     auto         layout           = activeVdesk()->activeLayout(conf);
     PHLWORKSPACE focusedWorkspace = nullptr;
     for (const auto& [desc, workspaceId] : layout) {
@@ -91,8 +120,7 @@ void VirtualDeskManager::applyCurrentVDesk() {
         if (workspace->m_monitor != mon)
             State::workspacePlacementController()->moveWorkspaceToMonitor(workspace, mon);
 
-        // Hack: we change the workspace on the current monitor as our last operation,
-        // so that we also automatically focus it
+        // Activate the destination focus output last, after all other outputs.
         if (currentMonitor && mon->m_id == currentMonitor->m_id) {
             focusedWorkspace = workspace;
             continue;
@@ -101,6 +129,19 @@ void VirtualDeskManager::applyCurrentVDesk() {
     }
     if (currentMonitor && focusedWorkspace)
         currentMonitor->changeWorkspace(focusedWorkspace, false);
+
+    if (restoreFocus) {
+        if (remembered)
+            Desktop::focusState()->fullWindowFocus(remembered, Desktop::FOCUS_REASON_WORKSPACE_CHANGE);
+        const auto focused = Desktop::focusState()->window();
+        // Focus may be redirected by fullscreen/modal rules. Warp to the actual
+        // focused window, respecting cursor:no_warps and the typing-hide policy.
+        if (focused && focused->m_isMapped && !focused->isHidden() && focused->m_workspace &&
+            !focused->m_workspace->m_isSpecialWorkspace && activeVdesk()->isWorkspaceOnActiveLayout(focused->m_workspace->m_id)) {
+            m_lastFocusedWindows[m_activeDeskKey] = focused;
+            Pointer::pointerController()->warpTo(focused->middle());
+        }
+    }
 
     g_pEventManager->postEvent(SHyprIPCEvent{VDESKCHANGE_EVENT_STR, std::to_string(m_activeDeskKey)});
 }

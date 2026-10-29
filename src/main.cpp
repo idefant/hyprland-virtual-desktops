@@ -15,12 +15,14 @@
 #include <plugins/PluginAPI.hpp>
 #include <src/desktop/DesktopTypes.hpp>
 #include <hyprutils/utils/ScopeGuard.hpp>
+#include <hyprland/src/desktop/state/FocusState.hpp>
 #include <vector>
 #include <sstream>
 
 using namespace Hyprutils::Memory;
 
 static CHyprSignalListener           onWorkspaceChangeHook   = nullptr;
+static CHyprSignalListener           onWindowFocusHook      = nullptr;
 static CHyprSignalListener           onWindowOpenHook        = nullptr;
 static CHyprSignalListener           onConfigReloadedHook    = nullptr;
 static CHyprSignalListener           onPreMonitorAddedHook   = nullptr;
@@ -344,7 +346,7 @@ void onWorkspaceChange(PHLWORKSPACE workspace) {
         if (id != vdesk->id && owner && owner->isWorkspaceOnActiveLayout(workspace->m_id)) {
             syncingExternalFocus = true;
             const Hyprutils::Utils::CScopeGuard resetFocusSync([] { syncingExternalFocus = false; });
-            manager->changeActiveDesk(id, true);
+            manager->changeActiveDesk(id, true, false);
             return;
         }
     }
@@ -528,6 +530,11 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigKeyword(PHANDLE, STICKY_RULES_KEYW, parseStickyRule, Hyprlang::SHandlerOptions{});
 
     onWorkspaceChangeHook   = Event::bus()->m_events.workspace.active.listen(onWorkspaceChange);
+    onWindowFocusHook       = Event::bus()->m_events.window.active.listen([](PHLWINDOW window, Desktop::eFocusReason reason) {
+        if (!monitorLayoutChanging && !syncingExternalFocus && reason != Desktop::FOCUS_REASON_WORKSPACE_CHANGE)
+            manager->rememberWindowFocus(window);
+    });
+    manager->rememberWindowFocus(Desktop::focusState()->window());
     onWindowOpenHook        = Event::bus()->m_events.window.open.listen(onWindowOpen);
     onConfigReloadedHook    = Event::bus()->m_events.config.reloaded.listen(onConfigReloaded);
     onPreMonitorAddedHook   = Event::bus()->m_events.monitor.preAdded.listen(onPreMonitorAdded);
@@ -540,5 +547,5 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 
     // Initialize first vdesk
     HyprlandAPI::reloadConfig();
-    return {"virtual-desktops", "Virtual desktop like workspaces", "LevMyskin", "2.2.8+multimonitor.3"};
+    return {"virtual-desktops", "Virtual desktop like workspaces", "LevMyskin", "2.2.8+multimonitor.4"};
 }
